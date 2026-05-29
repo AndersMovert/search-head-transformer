@@ -1,0 +1,36 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Checkpoints and model weights
+checkpoints/
+*.pt
+*.pth
+*.bin
+
+# Tokenizer models (regenerated on first run)
+*.model
+*.vocab
+
+# Dataset caches
+.cache/
+data/
+
+# Weights & Biases
+wandb/
+
+# Environment
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
