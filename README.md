@@ -137,7 +137,8 @@ Search head: [== easy ==][============ hard patterns ============]
 search-head-transformer/
 ├── README.md                              # This file
 ├── docs/
-│   └── architecture.md                    # Full architecture report
+│   ├── architecture.md                    # Full architecture report
+│   └── experiments.md                     # Planned and in-progress experiments
 ├── src/
 │   ├── search_head_byte.py                # Byte-level search head (V=256)
 │   └── search_head_bpe.py                 # BPE-4096 variant
