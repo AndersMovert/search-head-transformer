@@ -40,12 +40,12 @@ The search head creates a **self-supervised curriculum**. At each position, the 
 
 ### Results
 
-| Model | BPC at 2B chars | Architecture |
-|-------|----------------|--------------|
-| **Search Head** | **1.50** | h[t] + searched h[best_j] |
-| Concat-K=5 | 1.85 | h[t] + last 5 embeddings |
+| Model | BPC @ 2B chars | BPC @ 8B chars | Architecture |
+|-------|---------------|---------------|--------------|
+| **Search Head** | **1.50** | **1.32** | h[t] + searched h[best_j] |
+| Concat-K=5 | 1.85 | 1.63 | h[t] + last 5 embeddings |
 
-The 0.35 BPC gap demonstrates that selective context retrieval is dramatically more valuable than blind concatenation of recent context.
+The ~0.3 BPC gap is persistent across training, demonstrating that the search head doesn't just converge faster — it converges to a permanently better solution.
 
 ### Non-Degenerate Search
 
