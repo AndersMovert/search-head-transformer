@@ -74,7 +74,25 @@ Planned and in-progress experiments for the search head transformer.
 
 ---
 
-## 5. TBD
+## 5. Pre-trained Search Head vs Post-trained Vanilla Transformer
+
+**Hypothesis:** Post train a pre-trained vanilla transformer with a search head will get the same performance.
+
+**Background:** If you can just add a search head to a pre-trained vanilla transformer and get the same gain, that would be very useful as a way to take large open-source models and post-train them with a search head. The answer is likely no, since when you pre-train with the search head, the embeddings are optimized end-to-end to make search effective — a vanilla backbone never received that gradient signal.
+
+**Setup:**
+- Model A (baseline): Search head pre-trained from scratch (from Experiment 2)
+- Model B (test): Take the converged vanilla transformer, freeze backbone, replace `Linear(h[t])` with `MLP([h[t], h[best_j]])`, post-train only the new search head parameters
+- Same total compute budget for Model B's post-training as Model A's full training
+- Compare final BPC on the same validation set
+
+**Status:** Not started
+
+***Plot and table of results go here***
+
+---
+
+## 6. TBD
 
 Future experiments to consider:
 - BPE-4096 vs byte-level search head gains
