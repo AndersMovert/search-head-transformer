@@ -141,7 +141,9 @@ search-head-transformer/
 │   └── experiments.md                     # Planned and in-progress experiments
 ├── src/
 │   ├── search_head_byte.py                # Byte-level search head (V=256)
-│   └── search_head_bpe.py                 # BPE-4096 variant
+│   ├── search_head_bpe.py                 # BPE-4096 variant
+│   ├── concat_k_baseline.py              # Concat-K=5 baseline for comparison
+│   └── vanilla_baseline.py               # Vanilla linear head baseline
 ├── requirements.txt
 └── LICENSE
 ```
@@ -163,6 +165,24 @@ python src/search_head_bpe.py --wandb-project search-head
 # Resume from checkpoint
 python src/search_head_byte.py --resume
 ```
+
+### Baselines
+
+Two baseline models are included in `src/` for fair comparison. They share the exact same backbone (Temporal Split Attention, D=512, 8 layers, 8 heads), data pipeline, and training schedule — only the output head differs:
+
+```bash
+# Concat-K=5: MLP over last 5 concatenated embeddings
+python src/concat_k_baseline.py --wandb-project search-head
+
+# Vanilla: single linear projection h[t] → logits
+python src/vanilla_baseline.py --wandb-project search-head
+```
+
+| Model | Output Head | File |
+|-------|-------------|------|
+| Search Head | `MLP(h[t] \|\| h[best_j])` — searched pair | `search_head_byte.py` |
+| Concat-K=5 | `MLP([h[t], h[t-1], ..., h[t-4]])` — fixed window | `concat_k_baseline.py` |
+| Vanilla | `Linear(h[t])` — single embedding | `vanilla_baseline.py` |
 
 ### Requirements
 
