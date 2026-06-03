@@ -62,7 +62,29 @@ You can view the live training metrics on [Weights & Biases](https://api.wandb.a
 
 ---
 
-## 4. External Buffer Generalization (size 256 → 512)
+## 4. Pre-Training with External Buffer (size 256)
+
+**Hypothesis:** It is better to learn to search both internal and external buffers during pre-training, than post-train with external buffer.
+
+**Background:** The external buffer has a different positional encoding than the internal buffer. The first position in the context window has a very large error in both the vanilla transformer and the search head transformer, but pre-training with an external buffer will make it will make it possible to push down the errors on the first position in the context window, which will probably drive the training of the external buffer search.
+
+**Setup:**
+- Train from scratch — no pretrained weights, no frozen components
+- Single unified head: `MLP([h[t], best_internal, best_external]) → logits`
+- Internal search: score `[h[t], h[j], zeros]` through head weights for all j < t, pick highest confidence
+- External search: score `[h[t], best_internal, buf[k]]` through same head weights for all k in buffer
+- All parameters updated end-to-end (backbone + head)
+- External buffer: 256 embeddings from preceding context (sliding window, stride 1, last-position embedding)
+- Loss: standard next-token prediction
+- Script: `src/search_head_ext_buffer_pretrain.py`
+
+**Status:** Not started
+
+***Plot and table of results go here***
+
+---
+
+## 5. External Buffer Generalization (size 256 → 512)
 
 **Hypothesis:** A model post-trained on a size-256 external buffer generalizes to larger buffers at inference time without additional training.
 
@@ -79,7 +101,7 @@ You can view the live training metrics on [Weights & Biases](https://api.wandb.a
 
 ---
 
-## 5. Pre-trained Search Head vs Post-trained Vanilla Transformer
+## 6. Pre-trained Search Head vs Post-trained Vanilla Transformer
 
 **Hypothesis:** Post train a pre-trained vanilla transformer with a search head will get the same performance.
 
@@ -97,7 +119,7 @@ You can view the live training metrics on [Weights & Biases](https://api.wandb.a
 
 ---
 
-## 6. TBD
+## 7. TBD
 
 Future experiments to consider:
 - BPE-4096 vs byte-level search head gains
