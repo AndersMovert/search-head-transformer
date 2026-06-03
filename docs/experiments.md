@@ -34,7 +34,7 @@ Planned and in-progress experiments for the search head transformer.
 
 **Status:** Running
 
-[![W&B Chart](https://wandb.ai)](https://wandb.ai/b5dr6zq2qt-n-a/search-head/reports/Search-Head-vs-Vanilla-Transformer--VmlldzoxNzEwMzA1NA)
+You can view the live training metrics on [Weights & Biases](https://api.wandb.ai/links/b5dr6zq2qt-n-a/vbvaty6p)
 
 
 ---
