@@ -32,9 +32,9 @@ Planned and in-progress experiments for the search head transformer.
 - Search head: `MLP([h[t], h[best_j]]) → logits`
 - Same backbone, same data, same training schedule
 
-**Status:** Not started
+**Status:** Running
 
-***Plot and table of results go here***
+<iframe src="https://wandb.ai/b5dr6zq2qt-n-a/search-head/reports/Search-Head-vs-Vanilla-Transformer--VmlldzoxNzEwMzA1NA" style="border:none;height:1024px;width:100%">
 
 ---
 
