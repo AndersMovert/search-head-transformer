@@ -142,6 +142,7 @@ search-head-transformer/
 ├── src/
 │   ├── search_head_byte.py                # Byte-level search head (V=256)
 │   ├── search_head_bpe.py                 # BPE-4096 variant
+│   ├── search_head_external_buffer.py     # External buffer post-training (Experiment 3)
 │   ├── concat_k_baseline.py              # Concat-K=5 baseline for comparison
 │   └── vanilla_baseline.py               # Vanilla linear head baseline
 ├── requirements.txt
@@ -162,8 +163,12 @@ python src/search_head_byte.py --wandb-project search-head
 # Train BPE-4096 model (auto-trains tokenizer on first run)
 python src/search_head_bpe.py --wandb-project search-head
 
+# Post-train with external buffer (loads pretrained byte-level checkpoint)
+python src/search_head_external_buffer.py --wandb-project search-head
+
 # Resume from checkpoint
 python src/search_head_byte.py --resume
+python src/search_head_external_buffer.py --resume
 ```
 
 ### Baselines
@@ -181,8 +186,35 @@ python src/vanilla_baseline.py --wandb-project search-head
 | Model | Output Head | File |
 |-------|-------------|------|
 | Search Head | `MLP(h[t] \|\| h[best_j])` — searched pair | `search_head_byte.py` |
+| External Buffer | `MLP(h[t] \|\| h[best_internal] \|\| h[best_external])` — internal + buffer search | `search_head_external_buffer.py` |
 | Concat-K=5 | `MLP([h[t], h[t-1], ..., h[t-4]])` — fixed window | `concat_k_baseline.py` |
 | Vanilla | `Linear(h[t])` — single embedding | `vanilla_baseline.py` |
+
+### External Buffer (Experiment 3)
+
+Post-training experiment that adds an external buffer search on top of the frozen pretrained search head. The backbone and internal search are frozen; only the new external-embedding columns of the expanded head are trained.
+
+**Architecture:**
+- Frozen backbone produces embeddings for both the training sequence and preceding buffer context
+- Internal search (frozen): finds `best_internal` from `h[0..t-1]` within the sequence
+- External search: finds `best_external` from buffer embeddings (sliding window of `block_size`, stride 1)
+- Expanded head: `MLP([h[t], best_internal, best_external])` → logits
+
+**Training strategy:**
+- `head.0.weight` expanded from `(2048, 1024)` to `(2048, 1536)` — first 2D columns frozen via gradient mask, last D columns trained
+- `head.2.weight` (hidden→vocab) frozen
+- Effective trainable parameters: 1,048,576 (2048×512)
+
+```bash
+# Default: 256 buffer embeddings, loads best_model_byte.pt
+python src/search_head_external_buffer.py
+
+# Custom buffer size
+python src/search_head_external_buffer.py --buffer-size 512
+
+# Resume
+python src/search_head_external_buffer.py --resume
+```
 
 ### Requirements
 
