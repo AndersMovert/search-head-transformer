@@ -17,7 +17,10 @@ Planned and in-progress experiments for the search head transformer.
 
 **Status:** Running
 
-***Plot and table of results go here***
+You can view the live training metrics on [Weights & Biases](https://api.wandb.ai/links/b5dr6zq2qt-n-a/4lcgkept)
+
+**Results so far:** The search head transformer performs much better than blind concatenation of the last K=5 embeddings.
+
 
 ---
 
