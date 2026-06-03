@@ -36,7 +36,7 @@ Planned and in-progress experiments for the search head transformer.
 
 You can view the live training metrics on [Weights & Biases](https://api.wandb.ai/links/b5dr6zq2qt-n-a/vbvaty6p)
 
-**Results:** The search head transformer does not converge faster compared to a vanilla transformer. But will it converge to a higher accuracy? Stay tuned.
+**Results so far:** The search head transformer does not converge faster compared to a vanilla transformer. But will it converge to a higher accuracy? Stay tuned.
 
 ---
 
