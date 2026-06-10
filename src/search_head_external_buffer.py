@@ -39,7 +39,7 @@ from datasets import load_dataset
 
 # ── Hyperparameters ──────────────────────────────────────────────────────
 N = 256            # context window (block_size) for training sequence
-BUFFER_SIZE = 256  # number of embeddings in external buffer
+BUFFER_SIZE = 10  # number of embeddings in external buffer
 D = 512            # embedding dimension
 N_HEAD = 8
 N_LAYER = 8
@@ -287,6 +287,7 @@ class ExternalBufferSearchGPT(nn.Module):
 
             score_matrix = torch.full((B, T, T), float('-inf'), device=h.device)
             score_matrix[:, rows, cols] = max_probs
+
             best_j = score_matrix[:, 1:, :].argmax(dim=-1)
 
         return best_j
@@ -573,6 +574,8 @@ def main():
     parser.add_argument("--pretrained", type=str, default=str(PRETRAINED_CHECKPOINT),
                         help="Path to pretrained search head checkpoint")
     parser.add_argument("--resume", action="store_true", help="Resume from latest checkpoint")
+    parser.add_argument("--load-weights", type=str, default=None,
+                        help="Load model weights from checkpoint (starts training from epoch 1)")
     parser.add_argument("--tokens-per-epoch", type=int, default=TOKENS_PER_EPOCH)
     parser.add_argument("--epochs", type=int, default=EPOCHS)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
@@ -596,6 +599,7 @@ def main():
     CHECKPOINT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     # Load pretrained model and expand head
+    _resume_ckpt = None
     if args.resume and LATEST_CHECKPOINT_FILE.is_file():
         print("Resuming from latest external buffer checkpoint...")
         ckpt = torch.load(LATEST_CHECKPOINT_FILE, map_location=DEVICE, weights_only=False)
@@ -616,16 +620,40 @@ def main():
         model.head[0].weight.register_hook(_mask_pretrained_cols)
         start_epoch = ckpt["epoch"] + 1
         best_val = ckpt.get("best_val", float("inf"))
+        _resume_ckpt = ckpt
         print(f"Resumed from epoch {ckpt['epoch']}")
+    elif args.load_weights:
+        model = ExternalBufferSearchGPT(
+            vocab_size=VOCAB_SIZE, n_embd=D, n_head=N_HEAD, n_layer=N_LAYER,
+            block_size=N, buffer_size=buffer_size, mlp_head_hidden=MLP_HEAD_HIDDEN,
+            local_window=W,
+        ).to(DEVICE)
+        ckpt = torch.load(args.load_weights, map_location=DEVICE, weights_only=False)
+        model.load_state_dict(ckpt["model"], strict=False)
+        start_epoch = 1
+        best_val = float("inf")
+        print(f"Loaded weights from {args.load_weights} (starting from epoch 1)")
     else:
         model = load_pretrained_and_expand(args.pretrained, DEVICE, buffer_size)
         start_epoch = 1
         best_val = float("inf")
 
     run_name = args.wandb_name or f"extBuffer-{buffer_size}-N{N}-D{D}-L{N_LAYER}"
+
+    # Recover wandb run id from checkpoint so we can resume the same run
+    resume_run_id = None
+    if args.resume and LATEST_CHECKPOINT_FILE.is_file():
+        try:
+            _ckpt_peek = torch.load(LATEST_CHECKPOINT_FILE, map_location="cpu", weights_only=False)
+            resume_run_id = _ckpt_peek.get("wandb_run_id")
+            del _ckpt_peek
+        except Exception as e:
+            print(f"Warning: could not read wandb_run_id from checkpoint: {e}")
+
     wandb.init(
         project=args.wandb_project,
         name=run_name,
+        id=resume_run_id,
         config={
             "version": "ext-buffer-v1",
             "experiment": 3,
@@ -666,9 +694,18 @@ def main():
     )
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
 
+    global_step = 0
+    if _resume_ckpt is not None:
+        if "optimizer" in _resume_ckpt:
+            optimizer.load_state_dict(_resume_ckpt["optimizer"])
+        if "scheduler" in _resume_ckpt:
+            scheduler.load_state_dict(_resume_ckpt["scheduler"])
+        global_step = _resume_ckpt.get("global_step", 0)
+        print(f"  LR restored to {scheduler.get_last_lr()[0]:.2e}")
+        del _resume_ckpt
+
     print(f"\nTokens per epoch: {tokens_per_epoch:,}  |  Epochs: {epochs}\n")
 
-    global_step = 0
     for epoch in range(start_epoch, epochs + 1):
         print(f"Epoch {epoch}")
         epoch_seed = random.randint(0, 2**31)
@@ -730,6 +767,8 @@ def main():
 
             buf, xb, yb = buf.to(DEVICE), xb.to(DEVICE), yb.to(DEVICE)
 
+            tic_step = time.time()
+
             with torch.amp.autocast(DEVICE, enabled=use_amp):
                 logits, loss, loss_all, loss_last, _, _, logits_internal, loss_internal, loss_last_internal = model(xb, buf, targets=yb)
 
@@ -739,6 +778,8 @@ def main():
             nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
+
+            step_time = time.time() - tic_step
 
             valid_targets = yb[:, 1:]
             batch_tokens = valid_targets.numel()
@@ -771,7 +812,7 @@ def main():
                     f"  step {step:5d}  "
                     f"EXT all={avg_all:.4f} last={avg_last:.4f} acc={acc:.1f}%/{acc_last:.1f}% bpc={avg_all/math.log(2):.3f}/{avg_last/math.log(2):.3f}  "
                     f"INT all={avg_int:.4f} last={avg_int_last:.4f} acc={acc_int:.1f}%/{acc_int_last:.1f}% bpc={avg_int/math.log(2):.3f}/{avg_int_last/math.log(2):.3f}  "
-                    f"{pct:.0f}%",
+                    f"{pct:.0f}% {step_time:.2f}s",
                     end="\r", flush=True,
                 )
 
@@ -841,7 +882,11 @@ def main():
         torch.save({
             "epoch": epoch,
             "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "global_step": global_step,
             "best_val": best_val,
+            "wandb_run_id": wandb.run.id if wandb.run is not None else None,
         }, LATEST_CHECKPOINT_FILE)
 
         if val_loss < best_val:
@@ -849,7 +894,11 @@ def main():
             torch.save({
                 "epoch": epoch,
                 "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "global_step": global_step,
                 "best_val": best_val,
+                "wandb_run_id": wandb.run.id if wandb.run is not None else None,
             }, CHECKPOINT_FILE)
             print(f"  -> Saved best (val_bpc={val_loss / math.log(2):.3f})")
 

@@ -314,6 +314,8 @@ def rebuild_optimizer(model, lr, weight_decay):
 def main():
     parser = argparse.ArgumentParser(description="Train Concat-K GPT Baseline (Byte-Level)")
     parser.add_argument("--resume", action="store_true", help="Resume from latest checkpoint")
+    parser.add_argument("--load-weights", type=str, default=None,
+                        help="Load model weights from checkpoint (starts training from epoch 1)")
     parser.add_argument("--tokens-per-epoch", type=int, default=TOKENS_PER_EPOCH)
     parser.add_argument("--epochs", type=int, default=EPOCHS)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
@@ -334,9 +336,21 @@ def main():
     CHECKPOINT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     run_name = args.wandb_name or f"concatK{k}-byte-W{local_window}-N{N}-D{D}-L{N_LAYER}"
+
+    # Recover wandb run id from checkpoint so we can resume the same run
+    resume_run_id = None
+    if args.resume and LATEST_CHECKPOINT_FILE.is_file():
+        try:
+            _ckpt_peek = torch.load(LATEST_CHECKPOINT_FILE, map_location="cpu", weights_only=False)
+            resume_run_id = _ckpt_peek.get("wandb_run_id")
+            del _ckpt_peek
+        except Exception as e:
+            print(f"Warning: could not read wandb_run_id from checkpoint: {e}")
+
     wandb.init(
         project=args.wandb_project,
         name=run_name,
+        id=resume_run_id,
         config={
             "version": "concat-k-byte-v1",
             "N": N, "D": D, "N_HEAD": N_HEAD, "N_LAYER": N_LAYER,
@@ -381,16 +395,25 @@ def main():
 
     start_epoch = 1
     best_val = float("inf")
+    global_step = 0
     if args.resume and LATEST_CHECKPOINT_FILE.is_file():
         ckpt = torch.load(LATEST_CHECKPOINT_FILE, map_location=DEVICE, weights_only=False)
         model.load_state_dict(ckpt["model"])
         start_epoch = ckpt["epoch"] + 1
         best_val = ckpt.get("best_val", float("inf"))
-        print(f"Resumed from epoch {ckpt['epoch']}")
+        if "optimizer" in ckpt:
+            optimizer.load_state_dict(ckpt["optimizer"])
+        if "scheduler" in ckpt:
+            scheduler.load_state_dict(ckpt["scheduler"])
+        global_step = ckpt.get("global_step", 0)
+        print(f"Resumed from epoch {ckpt['epoch']} (lr={scheduler.get_last_lr()[0]:.2e})")
+    elif args.load_weights:
+        ckpt = torch.load(args.load_weights, map_location=DEVICE, weights_only=False)
+        model.load_state_dict(ckpt["model"], strict=False)
+        print(f"Loaded weights from {args.load_weights} (starting from epoch 1)")
 
     print(f"\nTokens per epoch: {tokens_per_epoch:,}  |  Epochs: {epochs}  |  K: {k}\n")
 
-    global_step = 0
     for epoch in range(start_epoch, epochs + 1):
         print(f"Epoch {epoch}")
         epoch_seed = random.randint(0, 2**31)
@@ -536,7 +559,11 @@ def main():
         torch.save({
             "epoch": epoch,
             "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "global_step": global_step,
             "best_val": best_val,
+            "wandb_run_id": wandb.run.id if wandb.run is not None else None,
         }, LATEST_CHECKPOINT_FILE)
 
         if val_loss < best_val:
@@ -544,7 +571,11 @@ def main():
             torch.save({
                 "epoch": epoch,
                 "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "global_step": global_step,
                 "best_val": best_val,
+                "wandb_run_id": wandb.run.id if wandb.run is not None else None,
             }, CHECKPOINT_FILE)
             print(f"  -> Saved best (val_bpc={val_loss / math.log(2):.3f})")
 

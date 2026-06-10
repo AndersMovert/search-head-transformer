@@ -35,6 +35,7 @@ N_HEAD = 8
 N_LAYER = 8
 W = 12             # local window size for recent heads
 MLP_HEAD_HIDDEN = 2048
+LOSS_MASK_POSITIONS = 64  # skip loss for the first N positions
 ALL_POS_WEIGHT = 1.0
 LAST_POS_WEIGHT = 1.0
 BATCH_SIZE = 10
@@ -225,6 +226,7 @@ class SearchHeadGPT(nn.Module):
 
             score_matrix = torch.full((B, T, T), float('-inf'), device=idx.device)
             score_matrix[:, rows, cols] = max_probs
+
             best_j = score_matrix[:, 1:, :].argmax(dim=-1)
 
         # Phase 2: Compute logits for selected pairs only (with grad)
@@ -242,9 +244,13 @@ class SearchHeadGPT(nn.Module):
         loss_last = None
         if targets is not None:
             valid_targets = targets[:, 1:]
+            # Mask first LOSS_MASK_POSITIONS from loss
+            mask_start = max(0, LOSS_MASK_POSITIONS - 1)
+            masked_logits = logits[:, mask_start:, :]
+            masked_targets = valid_targets[:, mask_start:]
             loss_all = F.cross_entropy(
-                logits.reshape(-1, logits.size(-1)),
-                valid_targets.reshape(-1),
+                masked_logits.reshape(-1, masked_logits.size(-1)),
+                masked_targets.reshape(-1),
             )
             loss_last = F.cross_entropy(logits[:, -1, :], valid_targets[:, -1])
             loss = ALL_POS_WEIGHT * loss_all + LAST_POS_WEIGHT * loss_last
@@ -313,12 +319,15 @@ def evaluate(model, val_batches, use_amp):
             logits, _, loss_all, loss_last, _ = model(xb, targets=yb)
 
         valid_targets = yb[:, 1:]
-        batch_tokens = valid_targets.numel()
+        mask_start = max(0, LOSS_MASK_POSITIONS - 1)
+        masked_targets = valid_targets[:, mask_start:]
+        batch_tokens = masked_targets.numel()
         total_loss += loss_all.item() * batch_tokens
         total_loss_last += loss_last.item() * xb.size(0)
         total_tokens += batch_tokens
         total_batches += xb.size(0)
-        total_correct += (logits.argmax(dim=-1) == valid_targets).sum().item()
+        masked_logits = logits[:, mask_start:, :]
+        total_correct += (masked_logits.argmax(dim=-1) == masked_targets).sum().item()
         total_correct_last += (logits[:, -1, :].argmax(dim=-1) == valid_targets[:, -1]).sum().item()
 
     avg_loss = total_loss / max(total_tokens, 1)
@@ -343,6 +352,8 @@ def rebuild_optimizer(model, lr, weight_decay):
 def main():
     parser = argparse.ArgumentParser(description="Train Search-Head GPT (Byte-Level)")
     parser.add_argument("--resume", action="store_true", help="Resume from latest checkpoint")
+    parser.add_argument("--load-weights", type=str, default=None,
+                        help="Load model weights from checkpoint (starts training from epoch 1)")
     parser.add_argument("--tokens-per-epoch", type=int, default=TOKENS_PER_EPOCH)
     parser.add_argument("--epochs", type=int, default=EPOCHS)
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
@@ -361,9 +372,21 @@ def main():
     CHECKPOINT_FILE.parent.mkdir(parents=True, exist_ok=True)
 
     run_name = args.wandb_name or f"searchHead-byte-W{local_window}-N{N}-D{D}-L{N_LAYER}"
+
+    # Recover wandb run id from checkpoint so we can resume the same run
+    resume_run_id = None
+    if args.resume and LATEST_CHECKPOINT_FILE.is_file():
+        try:
+            _ckpt_peek = torch.load(LATEST_CHECKPOINT_FILE, map_location="cpu", weights_only=False)
+            resume_run_id = _ckpt_peek.get("wandb_run_id")
+            del _ckpt_peek
+        except Exception as e:
+            print(f"Warning: could not read wandb_run_id from checkpoint: {e}")
+
     wandb.init(
         project=args.wandb_project,
         name=run_name,
+        id=resume_run_id,
         config={
             "version": "search-head-byte-v1",
             "N": N, "D": D, "N_HEAD": N_HEAD, "N_LAYER": N_LAYER,
@@ -408,16 +431,25 @@ def main():
 
     start_epoch = 1
     best_val = float("inf")
+    global_step = 0
     if args.resume and LATEST_CHECKPOINT_FILE.is_file():
         ckpt = torch.load(LATEST_CHECKPOINT_FILE, map_location=DEVICE, weights_only=False)
         model.load_state_dict(ckpt["model"])
         start_epoch = ckpt["epoch"] + 1
         best_val = ckpt.get("best_val", float("inf"))
-        print(f"Resumed from epoch {ckpt['epoch']}")
+        if "optimizer" in ckpt:
+            optimizer.load_state_dict(ckpt["optimizer"])
+        if "scheduler" in ckpt:
+            scheduler.load_state_dict(ckpt["scheduler"])
+        global_step = ckpt.get("global_step", 0)
+        print(f"Resumed from epoch {ckpt['epoch']} (lr={scheduler.get_last_lr()[0]:.2e})")
+    elif args.load_weights:
+        ckpt = torch.load(args.load_weights, map_location=DEVICE, weights_only=False)
+        model.load_state_dict(ckpt["model"], strict=False)
+        print(f"Loaded weights from {args.load_weights} (starting from epoch 1)")
 
     print(f"\nTokens per epoch: {tokens_per_epoch:,}  |  Epochs: {epochs}\n")
 
-    global_step = 0
     for epoch in range(start_epoch, epochs + 1):
         print(f"Epoch {epoch}")
         epoch_seed = random.randint(0, 2**31)
@@ -498,12 +530,15 @@ def main():
             scaler.update()
 
             valid_targets = yb[:, 1:]
-            batch_tokens = valid_targets.numel()
+            mask_start = max(0, LOSS_MASK_POSITIONS - 1)
+            masked_targets = valid_targets[:, mask_start:]
+            batch_tokens = masked_targets.numel()
             total_loss_all += loss_all.item() * batch_tokens
             total_loss_last += loss_last.item() * xb.size(0)
             total_tokens += batch_tokens
             total_batches_count += xb.size(0)
-            total_correct += (logits.argmax(dim=-1) == valid_targets).sum().item()
+            masked_logits_train = logits[:, mask_start:, :]
+            total_correct += (masked_logits_train.argmax(dim=-1) == masked_targets).sum().item()
 
             with torch.no_grad():
                 total_correct_last += (logits[:, -1, :].argmax(dim=-1) == valid_targets[:, -1]).sum().item()
@@ -589,7 +624,11 @@ def main():
         torch.save({
             "epoch": epoch,
             "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "scheduler": scheduler.state_dict(),
+            "global_step": global_step,
             "best_val": best_val,
+            "wandb_run_id": wandb.run.id if wandb.run is not None else None,
         }, LATEST_CHECKPOINT_FILE)
 
         if val_loss < best_val:
@@ -597,7 +636,11 @@ def main():
             torch.save({
                 "epoch": epoch,
                 "model": model.state_dict(),
+                "optimizer": optimizer.state_dict(),
+                "scheduler": scheduler.state_dict(),
+                "global_step": global_step,
                 "best_val": best_val,
+                "wandb_run_id": wandb.run.id if wandb.run is not None else None,
             }, CHECKPOINT_FILE)
             print(f"  -> Saved best (val_bpc={val_loss / math.log(2):.3f})")
 
