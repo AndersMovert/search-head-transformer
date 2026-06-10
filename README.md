@@ -48,7 +48,9 @@ After 10 billion characters of training (~1,000 epochs), the vanilla transformer
 
 ![Last-position loss](loss_last.jpg)
 
-The final position in the context window — the one that matters most during actual generation — reaches a loss of 0.76 (1.1 BPC) after 18.4 billion characters of training. In real use, the model always predicts from the last position, so this is the metric that directly determines generation quality.
+The final position in the context window — the one that matters most during actual generation — reaches a loss of 0.76 (1.1 BPC) after 18.4 billion characters of training. In real use, the model always predicts from the last position, so this is the metric that directly determines generation quality. 
+
+1.1 BPC is quite good for a model with only 28 million parameters.
 
 ### Non-Degenerate Search
 
