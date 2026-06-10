@@ -40,12 +40,9 @@ The search head creates a **self-supervised curriculum**. At each position, the 
 
 ### Results
 
-| Model | BPC @ 2B chars | BPC @ 8B chars | Architecture |
-|-------|---------------|---------------|--------------|
-| **Search Head** | **1.50** | **1.32** | h[t] + searched h[best_j] |
-| Concat-K=5 | 1.85 | 1.63 | h[t] + last 5 embeddings |
+![Training loss comparison](loss_all.jpg)
 
-The ~0.3 BPC gap is persistent across training, demonstrating that the search head doesn't just converge faster — it converges to a permanently better solution.
+After 10 billion characters of training (~1,000 epochs), the vanilla transformer's loss flattens — it has extracted what it can from fixed-position prediction. The search head transformer continues to decrease, with no sign of plateauing. The search mechanism provides a richer learning signal: as the backbone improves, better embeddings enable better search, which in turn produces harder training pairs. This feedback loop sustains learning long after the vanilla model has saturated.
 
 ### Non-Degenerate Search
 
