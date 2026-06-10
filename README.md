@@ -44,6 +44,12 @@ The search head creates a **self-supervised curriculum**. At each position, the 
 
 After 10 billion characters of training (~1,000 epochs), the vanilla transformer's loss flattens — it has extracted what it can from fixed-position prediction. The search head transformer continues to decrease, with no sign of plateauing. The search mechanism provides a richer learning signal: as the backbone improves, better embeddings enable better search, which in turn produces harder training pairs. This feedback loop sustains learning long after the vanilla model has saturated.
 
+### Last-Position Loss
+
+![Last-position loss](loss_last.jpg)
+
+The final position in the context window — the one that matters most during actual generation — reaches a loss of 0.76 (1.1 BPC) after 18.4 billion characters of training. In real use, the model always predicts from the last position, so this is the metric that directly determines generation quality.
+
 ### Non-Degenerate Search
 
 The model doesn't trivially select position `t-1`. The metric `frac_t_minus_1` stays at ~1% (below the 2.2% uniform random baseline), confirming the search learns meaningful long-range retrieval patterns.
