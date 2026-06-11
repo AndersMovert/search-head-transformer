@@ -6,7 +6,7 @@
 
 **A confidence-based search mechanism at the output layer that replaces the standard linear projection with learned context retrieval.**
 
-Instead of predicting the next token from a single hidden state `h[t]`, the search head pairs `h[t]` with every previous embedding `h[j]` and selects the pair that produces the most confident prediction. This simple change yields a **0.35 BPC improvement** over concatenation baselines at 2B characters of training.
+Instead of predicting the next token from a single hidden state `h[t]`, the search head pairs `h[t]` with every previous embedding `h[j]` and selects the pair that produces the most confident prediction. 
 
 > The search head transforms the transformer from a batch sequence processor into a reactive system with non-blocking read access to an evolving information environment.
 
